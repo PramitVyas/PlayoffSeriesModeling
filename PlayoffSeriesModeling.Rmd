@@ -1,0 +1,1430 @@
+---
+title: 'Playoff Series Modeling '
+output: html_document
+author: "Pramit Vyas"
+date: "`r format(Sys.Date(), '%m/%d/%y')`"
+---
+
+```{r set options, include=FALSE}
+# DO NOT CHANGE THE LINE BELOW 
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+``` {css styling, echo=FALSE}
+
+<style>
+.tocify {
+max-width: 175px !important;
+}
+</style>
+
+<style>
+.main-container {
+width: 100%;
+max-width: 940px;
+margin-left: 250px;
+margin-right: auto;
+}
+</style>
+
+<style>
+.red-header {
+  color: red;
+}
+</style>
+
+```
+
+```{r logo, echo = FALSE}
+
+htmltools::img(src = 'https://cdn.freelogovectors.net/wp-content/uploads/2022/09/nba-playoffs-logo-freelogovectors.net_-1.png',
+                height = '250px',
+                alt = 'logo',
+                style = 'position: fixed; top: -40px; left: 5px;')
+```
+
+
+# Introduction  
+
+
+
+
+**Throughout this document, any `season` column represents the year each season started. For example, the 2015-16 season will be in the dataset as 2015. For most of the rest of the project, we will refer to a season by just this number (e.g. 2015) instead of the full text (e.g. 2015-16).**   
+
+
+# Setup and Data    
+
+```{r load data, message = F, warning = F}
+library(tidyverse)
+# Note, you will likely have to change these paths. If your data is in the same folder as this project, 
+# the paths will likely be fixed for you by deleting ../../Data/awards_project/ from each string.
+player_data <- read.csv("player_game_data.csv")
+team_data <- read.csv("team_game_data.csv")
+```
+
+## Part 1 -- Data Cleaning & Questions to answer to help with objective        
+
+
+
+### Question 1  
+
+**QUESTION:** What was the Warriors' Team offensive and defensive eFG% in the 2015-16 regular season? Remember that this is in the data as the 2015 season.  
+
+```{r}
+
+
+#Function that calculates EFG% for a dataframe
+eFG <- function(team_df){
+  eFG = team_df %>% 
+    dplyr::select(fgmade, fgattempted, fg3made) %>%  #Selects relevant variables used to calculate eFG
+    summarise(across(everything(), sum)) %>% #Aggregates all the games that season
+    mutate(eFG = (fgmade + .5 * fg3made) / fgattempted) %>% #Calculates eFG with formula
+    pull(eFG)
+  return(eFG)
+}
+
+#Filters to the regular season of 2015-16 and calculates eFG for the Golden State Warriors
+team_data %>% 
+  filter(gametype == 2 & season == 2015 & off_team == "GSW") %>%
+  eFG() %>%
+  {str_glue("Offensive eFG% for the Golden State Warriors in the 2015-2016 season is {round(100 * ., 1)}%")} 
+
+#Filters to the regular season of 2015-16 and calculates eFG for the ppponents of the Golden State Warriors
+team_data %>% 
+  filter(gametype == 2 & season == 2015 & def_team == "GSW") %>%
+  eFG() %>%
+  {str_glue("Defensive eFG% for the Golden State Warriors in the 2015-2016 season is {round(100 * ., 1)}%")} 
+           
+```
+
+<span style="color:red">**ANSWER 1:**</span>  
+
+Offensive: 56.3% eFG     
+Defensive: 47.9% eFG     
+
+
+### Question 2     
+
+**QUESTION:** What percent of the time does the team with the higher eFG% in a given game win that game? Use games from the 2014-2023 regular seasons. If the two teams have an exactly equal eFG%, remove that game from the calculation.  
+
+```{r}
+#Creates dataframe calculating eFG% for each row (each game and each team)
+team_data2 = team_data %>% 
+  filter(between(season, 2014, 2023), gametype == 2) %>% mutate(eFG = (fgmade + .5 * fg3made) / fgattempted) 
+
+
+#Function that calculates what percent of teams win the game given that they have a higher value of a certain stat
+percWinOffStat = function(stat){
+  #Subsets data to just include relevant variables
+  statdf =  team_data2 %>% dplyr::select(gamedate, off_team, def_team, off_win, all_of(stat)) 
+  team_data %>% 
+    filter(between(season, 2014, 2023), gametype == 2) %>% 
+    mutate(eFG = (fgmade + .5 * fg3made) / fgattempted) %>% 
+    select(gamedate, off_team, def_team, off_win, all_of(stat)) %>% 
+    #Recalculates relevant dataframe to merge 2 of the same dataframe by offensive and defensive team key to be able to compare relevant stats for each team
+    inner_join(statdf, by = join_by(gamedate == gamedate, off_team == def_team)) %>% #Joined dfs for comparison
+    rename(
+    stat.x = stat %>% str_glue(".x") %>% all_of(),
+    stat.y = stat %>% str_glue(".y") %>% all_of() ) %>% #Renamed stat variables to neutral names for easier reproduceablity
+    filter(stat.x != stat.y) %>% 
+    mutate(betterEFGisWinner = if_else((stat.x > stat.y & off_win.x == 1) | 
+                                         (stat.x < stat.y & off_win.x == 0) , TRUE, FALSE)) %>% #Determine if team if better value for given stat won that game
+    summarise(perc = sum(betterEFGisWinner)/n()) %>%
+    pull(perc) %>%
+    {str_glue("Team with better ",stat," won {round(100 * ., 1)}% of the time from 2014-2023")} 
+}
+
+```
+
+Apply function to eFG% stat
+```{R}
+
+percWinOffStat('eFG')
+
+```
+
+<span style="color:red">**ANSWER 2:**</span>  
+
+81.6%   
+
+### Question 3  
+
+**QUESTION:** What percent of the time does the team with more offensive rebounds in a given game win that game? Use games from the 2014-2023 regular seasons. If the two teams have an exactly equal number of offensive rebounds, remove that game from the calculation.   
+
+Apply function to offensive rebound stat
+```{r}
+
+percWinOffStat('reboffensive')
+
+
+
+```
+
+<span style="color:red">**ANSWER 3:**</span>  
+
+46.2%   
+
+### Question 4  
+
+**QUESTION:** Theories as to why the answer to question 3 is lower than the answer to question 2
+
+<span style="color:red">**ANSWER 4:**</span>    
+
+Yes, the team that shot more efficient especially when considering 3s (eFG%) is going to win more games as they made a better use of their shots, which is why their win percentage is so large. Meanwhile, for offensive rebounds, although good rebounding, especially off your own miss is very valuable, if a team collects more offensive rebounds, it also means that they had many more chances to collect offensive rebounds. This in turn means that they missed more shots, thus they are more likely to lose. Here, missing shots is a confounding variable that causes both losses and offensive rebounds.
+
+
+### Question 5   
+
+**QUESTION:** Look at players who played at least 25% of their possible games in a season and scored at least 25 points per game played. Of those player-seasons, what percent of games were they available for on average? Use games from the 2014-2023 regular seasons.     
+
+For example:   
+
+- Ja Morant does not count in the 2023-24 season, as he played just 9 out of 82 games this year, even though he scored 25.1 points per game.   
+- Chet Holmgren does not count in the 2023-24 season, as he played all 82 games this year but scored 16.5 points per game.  
+- LeBron James does count in the 2023-24 season, as he played 71 games and scored 25.7 points per game.  
+
+```{r}
+
+#Creates a variable that stores the points per game for every player through every regular season from 2014-2023
+ppgData <- player_data %>% 
+  filter(between(season, 2014, 2023), gametype == 2, seconds != 0) %>%
+  group_by(player_name, season) %>%
+  summarise(points = mean(points)) %>% 
+  arrange(player_name, season) %>% 
+  pull(points)
+
+#Creates variable that stores relevant information relating to possible games, number of games where they got minutes, and number of games they couldn't play due to injury or suspension for every regular season from 2014-2023
+gamesPlayedData <- player_data %>%
+  mutate(played = if_else(seconds > 0, 1, 0)) %>%
+  filter(between(season, 2014, 2023), gametype == 2) %>% 
+  group_by(player_name, season) %>% 
+  summarise(possibleGames = n(), numPlayed = sum(played), numNotAvailable = sum(missed)) %>%
+  filter(possibleGames-numPlayed != possibleGames) %>%
+  arrange(player_name, season)
+
+#Appends points statistics to create comprehensive pictures for this problem
+gamesPlayedData$ppg = ppgData
+
+#Does necessary calculations
+gamesPlayedData %>% 
+  filter(numPlayed >= possibleGames * .25, ppg >= 25) %>%
+  mutate(availability = 1-numNotAvailable/possibleGames) %>%
+  pull(availability) %>%
+  mean() %>%
+  {str_glue("Players in seasons where they played at least 25% of the games averaging at least 25ppg were available  {round(100 * ., 1)}% of the time")}
+  
+
+```
+
+<span style="color:red">**ANSWER 5:**</span>  
+
+82.9% of games     
+
+## Question 6  
+
+**QUESTION:** What % of playoff series are won by the team with home court advantage? Give your answer by round. Use playoffs series from the 2014-**2022** seasons. Remember that the 2023 playoffs took place during the 2022 season (i.e. 2022-23 season).
+
+```{r}
+
+#Function that creates a dataframe that stores each playoff game as well as what round it took place in with the parameters being the timeframe
+teamSeason <- function(startdate, enddate){
+  team_data %>% 
+  arrange(off_team, gamedate) %>%
+  filter(between(season, startdate, enddate), gametype == 4) %>%
+  mutate(nextGame = lead(def_team), .before = def_home) %>%
+  select(season, gamedate, off_team, off_home, off_win, def_team) %>% 
+  #Creates Multiple data frames, one for each team in their playoff run for a particular season, allows for easier calculations of assigning rounds
+  group_by(season, off_team) %>% 
+  group_split() %>%
+  #Iterated through the created dataframes and assigns rounds whenever opponents change, and then merges them all back into 1 dataframe
+  map_dfr( ~ .x %>% mutate(
+  playoffRound = cumsum(def_team != lag(def_team, default = first(def_team))) + 1
+  ))
+}
+
+
+teamSeason(2014, 2022)  %>%
+  group_by(season, off_team, def_team) %>%
+  summarise(homecourt = first(off_home), won = if_else(sum(off_win) == 4, 1, 0), playoffRound = mean(playoffRound)) %>%
+  filter(homecourt == 1) %>%
+  mutate(
+  playoffRound = case_when(
+      playoffRound == 1 ~ "First Round",
+      playoffRound == 2 ~ "Second Round",
+      playoffRound == 3 ~ "Conference Finals",
+      playoffRound == 4 ~ "NBA Finals"
+    ),
+  playoffRound = factor(playoffRound, levels = c("First Round", "Second Round", "Conference Finals", "NBA Finals"))
+  ) %>%
+  group_by(playoffRound) %>%
+  summarise(homeWinPerc = round(sum(won)/sum(homecourt) * 100, 1)) 
+
+```
+
+<span style="color:red">**ANSWER 6:**</span>   
+
+Round 1: 84.7%   
+Round 2: 63.9%   
+Conference Finals: 55.6%    
+Finals: 77.8%    
+
+
+## Question 7    
+
+**QUESTION:** Among teams that had at least a +5.0 net rating in the regular season, what percent of them made the second round of the playoffs the **following** year? Among those teams, what percent of their top 5 total minutes played players (regular season) in the +5.0 net rating season played in that 2nd round playoffs series? Use the 2014-2021 regular seasons to determine the +5 teams and the 2015-2022 seasons of playoffs data.
+
+For example, the Thunder had a better than +5 net rating in the 2023 season. If we make the 2nd round of the playoffs **next** season (2024-25), we would qualify for this question. Our top 5 minutes played players this season were Shai Gilgeous-Alexander, Chet Holmgren, Luguentz Dort, Jalen Williams, and Josh Giddey. If three of them play in a hypothetical 2nd round series next season, it would count as 3/5 for this question.    
+    
+
+```{r, warning = FALSE}
+#Stores relevant variables for analysis
+relVars <- team_data %>% 
+  filter(gametype == 2, between(season, 2014, 2021)) %>%
+  select(season, gamedate, off_team, def_team, points, possessions)
+
+#Variable that stores each team between 2014 through 2021 that had a net rating above 5.0 in the regular season
+greatTeams <- team_data %>% 
+  filter(gametype == 2, between(season, 2014, 2021)) %>%
+  select(season, gamedate, off_team, def_team, points, possessions) %>%
+  #Joins the relevant variable dataframe by opponent team to be able to access both stats in the same row
+  inner_join(relVars, by = join_by(gamedate == gamedate, off_team == def_team)) %>%
+  select(-off_team.y, -season.y) %>%
+  #Regular expressions for more readable variable names for offensive team and opponent
+  rename_with(~ str_replace(.x, "\\.x$", ""), ends_with(".x")) %>%
+  rename_with(~ str_replace(.x, "\\.y$", "_Opponent"), ends_with(".y")) %>%
+  #Calculates averages for the seasons for stats that are used to calculate net rating
+  group_by(season, off_team) %>%
+  summarise(points = mean(points), OppPoints = mean(points_Opponent), possessions = mean(possessions), Opppossessions = mean(possessions_Opponent)) %>%
+  #Calculates net rating and filters teams
+  mutate(netRTG = points/(possessions/100) - OppPoints/(Opppossessions/100)) %>%
+  filter(netRTG >= 5) %>%
+  select(season, off_team)
+
+#Teams that made the second round in this span and the years they made it
+secondRoundTeams <- teamSeason(2015, 2022)  %>% 
+  filter(playoffRound == 2) %>%
+  group_by(season, off_team) %>% 
+  summarise(playoffRound = first(playoffRound))
+
+#Finds all the above 5 net rating teams that made the second round the following year by performing and inner join with the second round teams
+gTeamsSecond <- greatTeams %>%
+  mutate(season = season + 1) %>%
+  inner_join(secondRoundTeams, by = join_by(season == season, off_team == off_team))
+
+
+gTeamsSecond%>%
+  nrow() %>%
+  {str_glue("Percent of teams that have net rating over 5 that made the playoffs the following year is  {round(. / nrow(greatTeams) * 100, 1)}%")}
+```
+```{R}
+#Dataframe that stores each top netRTG teams that made second round the following year's top 5 players based on total minutes for the regular season
+seasonTopMins <-player_data %>% 
+  filter(gametype == 2, between(season, 2014, 2021)) %>%
+  #Groups player data to figure out total minutes played on a team for a given season
+  group_by(season, player_name, team) %>%
+  summarise(totalMinutes = sum(seconds) / 60) %>% 
+  #Figures out players on the teams that had a net rating of 5 the year before making the second round
+  inner_join(gTeamsSecond %>% mutate(season = season - 1), by = join_by(season == season, team == off_team)) %>%
+  select(-playoffRound) %>%
+  #Finds top 5 minutes played players on each of those teams
+  group_by(team, season) %>%
+  arrange(desc(totalMinutes)) %>% 
+  slice_head(n = 5)
+
+
+#Finds the round of the playoff that each team
+player_data  %>%
+  filter(between(season, 2015, 2022), gametype == 4) %>%
+  inner_join(seasonTopMins %>% mutate(season = season + 1), by = join_by(season == season, player_name == player_name, team == team)) %>%
+  select(gamedate, season, player_name, team, opp_team, totalMinutes) %>% 
+  arrange(team, gamedate) %>% 
+  group_by(season, team) %>% 
+  group_split() %>%
+  map_dfr( ~ .x %>% mutate(
+  playoffRound = cumsum(opp_team != lag(opp_team, default = first(opp_team))) + 1
+  )) %>%
+    filter(playoffRound == 2) %>%
+  group_by(season, player_name) %>%
+  summarise(played = sum(totalMinutes) > 0, team = first(team)) %>%
+  nrow() %>%
+  {str_glue("Percent of top 5 minutes played players who played in those 2nd round series {round(. / nrow(seasonTopMins) * 100, 2)}%")}
+
+```
+
+<span style="color:red">**ANSWER 7:**</span>   
+
+Percent of +5.0 net rating teams making the 2nd round next year: 63.6%   
+Percent of top 5 minutes played players who played in those 2nd round series: 79.1%   
+
+
+## Part 2 -- Playoffs Series Modeling               
+
+For this part, I will work to fit a model that predicts the winner and the number of games in a playoffs series between any given two teams.   
+
+
+1. Final output will include the probability of each team winning the series. For example: “Team A has a 30% chance to win and team B has a 70% chance.” instead of “Team B will win.” Along with this, there will also be a series distributional predictions  
+
+
+4. The best models are explainable and lead to actionable insights around team and roster construction. We're more interested in your thought process and critical thinking than we are in specific modeling techniques. Using smart features is more important than using fancy mathematical machinery. 
+
+
+
+```{r}
+#Creates dataframe for the playoff games that will be used in this model, and assigns playoff rounds and what number game it is to each game
+playoff_data <-  team_data %>%
+  arrange(off_team, gamedate) %>%
+  filter(gametype == 4, between(season, 2017, 2022)) %>%
+  group_by(season, off_team) %>%
+  #Splits data into separate dataframes, one for each combination of season and team
+  group_split() %>%
+  #Goes through each and assigns a new round number whenever the opponent changes, and puts all these dataframes back together into 1 dataframe
+  map_dfr(~ .x %>%
+    mutate(
+      playoffRound = cumsum(def_team != lag(def_team, default = first(def_team))) + 1
+    )) %>%
+  group_by(season, off_team, playoffRound) %>%
+  #Now splits this overall dataframe into multiple dataframes based on season, team and round
+  group_split() %>%
+  #Goes through each and iterates game number 1 by 1
+    map_dfr(~ .x %>%
+    mutate(
+      game = row_number()
+    ))
+  
+```
+
+Creates function that makes a regular season dataframe based on start and end dates
+Also createss important variables to use in data modeling,
+These include:
+
+- **fgPerc**: Field Goal Percentage (FG%)
+- **fg3Perc**: Three-Point Percentage (3PT%)
+- **ftPerc**: Free Throw Percentage (FT%)
+- **oRebPerc**: Percent of offensive rebounds taken by a team from the ones available
+- **dRebPerc**: Percent of defensive rebounds taken by a team from the ones available
+- **point_diff**: Difference between the number of points scored and points that opponents scored on average for the season
+- **assistsPerc**: Percent of makes that were assisted on
+- **blocks**: Number of blocks gotten by a team per game
+- **steals**: Number of steals by a team per game
+
+All of the aforementioned stats were also counted for the opponents to calculate how well teams were able to lower their opponent's stats on average. These stats are overall for the season.
+
+- **wins**: Number of wins in a season
+- **winPerc**: Percent of games won in a season
+- **oRTG**: Offensive rating, or points scored if a game was 100 possessions
+- **dRTG**: Defensive rating, or points allowed if a game was 100 possessions
+- **netRTG**: Net rating, or point differential if a game was 100 possessions
+- **winPercEndI**: This variable is the difference between the overall season win percentage and the win percentage in the last 25 games. The intuition behind this stat is to see how teams can make important moves at the trade deadline, make some key signings, and develop team chemistry around the end of the season which can translate into the playoffs. This may not be heavily reflected in their overall win percentage. The differential is taken rather than just the raw `winPercEnd` to avoid multicollinearity with `winPerc`, as this stat is intended to track improvement at the end of the season.
+- **crunchWinPercI**: This variable tracks the win percentage in close games, defined as games where the point differential was less than 7. The intuition behind this stat is that many playoff games are close, and these individual close games have a larger impact per game than regular season games as there are fewer playoff games. Performing well in close games could impact playoff game success, especially when the stakes are high. Again, the differential is taken to avoid multicollinearity and to assess the impact of crunch time performance on its own.
+
+
+```{R}
+#Creates a dataframe that includes relevant data that is now season-wide instead of just for a game, and engineers relevant variables
+#@params start- season to start construction of dataframe
+#@params end- season to end construction of dataframe
+createRegSeason = function(start, end){
+regSeasondef = team_data %>%
+  arrange(off_team, gamedate)%>%
+  filter(gametype == 2, between(season,start, end)) %>%
+  mutate(fgPerc = fgmade / fgattempted, fg3Perc = fg3made / fg3attempted, ftPerc = ftmade / ftattempted, assistsPerc= assists/fgmade)
+regSeason <- team_data %>%
+  arrange(off_team, gamedate)%>%
+  filter(gametype == 2, between(season,start, end)) %>%
+  mutate(fgPerc = fgmade / fgattempted, fg3Perc = fg3made / fg3attempted, ftPerc = ftmade / ftattempted, assistsPerc= assists/fgmade) %>%
+  inner_join(regSeasondef, join_by(gamedate == gamedate, off_team == def_team)) %>%
+    rename_with(~ str_replace(.x, "\\.x$", ""), ends_with(".x")) %>%
+    rename_with(~ str_replace(.x, "\\.y$", "_def"), ends_with(".y")) %>% 
+  select(-season_def, -gametype_def, -offensivenbateamid_def, -off_team_def, -off_home_def, -off_win_def,
+         -defensivenbateamid_def, -def_team_name_def, -def_home_def, -def_win_def, -nbagameid_def, -off_team_name_def) %>%
+  group_by(season, off_team) %>%
+  summarise(num_games = n(), wins = sum(off_win), across(fg2made:assistsPerc_def, mean, .names = "{.col}")) %>%
+  mutate(winPerc = wins/num_games) %>%
+  rename(blocks = blocksagainst_def, blocks_def = blocksagainst, steals = stealsagainst_def, steals_def = stealsagainst) %>% 
+  mutate(point_diff = points - points_def, offRTG = points/(possessions/100),  
+         defRTG =points_def/(possessions_def/100), .before = fg2made, netRTG = offRTG-defRTG, oRebPerc = reboffensive / (reboffensive + rebdefensive_def), dRebPerc = rebdefensive / (rebdefensive + reboffensive_def))
+
+#Figures out win percentage around after the deadline, lets say they play around 25 games after the deadline on average
+
+#Gets last 25 games for each team each season
+last25 <- team_data %>% 
+  filter(between(season,start, end), gametype == 2) %>% 
+  arrange(off_team, season, gamedate) %>%
+   group_by(off_team, season) %>%
+  group_modify(~ slice_tail(., n = 25)) %>%
+  ungroup() %>%
+  group_by(season, off_team) %>%
+  summarise(winPercEnd = mean(off_win))
+
+regSeason2 = regSeason %>% inner_join(last25, join_by(off_team == off_team, season == season))
+
+#Variable that stores each team and its performance in close games
+crunchTime <- team_data %>% 
+  filter(between(season,start, end), gametype == 2) %>% 
+  inner_join(team_data, join_by(gamedate == gamedate, off_team == def_team)) %>%
+  mutate(diff = abs(points.x - points.y)) %>%
+  select(off_team, diff, gamedate, season.x, off_win.x) %>%
+  filter(diff < 7) %>%
+  group_by(off_team, season.x) %>%
+  summarise(crunchWinPerc = mean(off_win.x)) %>%
+  ungroup() %>%
+  rename(season = season.x)
+regSeason3 <- regSeason2 %>% left_join(crunchTime, join_by(season == season, off_team == off_team)) %>% mutate(winPercEndI = winPercEnd - winPerc, crunchWinPercI = crunchWinPerc - winPerc) %>%
+  select(-winPercEnd, -crunchWinPerc)
+  
+
+
+return(regSeason3)
+}
+
+regSeason = createRegSeason(2014, 2022)
+```
+Made player variables based on top players that I believe could effect playoff success.
+- **valor**: This is a measure first to determine top players on a team to evaluate the metrics mentioned below, it is also used as a measure of how "good" the top player is. Thought this would be relevant from the common notion that successful playoff teams usually have a top player as their best player
+-**exp**: This variable measures the past playoff experience of their top 5 players based on valor. It measures this by counting the number of playoff wins that they have had before that particular season. Engineered this variable due to the notion that succesful playoff teams usually have players who have been through it a few times
+injuries: This variable counts injuries going into the playoffs for the top 5 players on each team, it is a boolean of whether a player missed all 5 games before the playoffs due to injury or suspension. If it is due to injury, this could mean an extended injury that could affect their post-season play
+```{R}
+#Variable that stores every season's last game so that we know what team a player ended the season on
+last_game <- player_data %>%
+  filter(gametype == 2, between(season,2018, 2023)) %>%
+  group_by(season, team) %>%
+  filter(gamedate == max(gamedate)) %>%
+  ungroup() %>% select(player_name, season, team)
+
+#DataFrame of top players for each team each season, which will be used with team stats in analysis
+topPlayers <- player_data  %>% 
+  #Makes sure that all of a players stats are counted under the team that they ended with
+  inner_join(last_game, by = join_by(player_name, season))%>%
+  select(-nbagameid, -nbapersonid, -nbateamid, -team.x) %>%
+  rename(team = team.y) %>%
+  filter(gametype == 2, between(season,2018, 2023), missed != 1) %>% mutate(gameScore = points + 0.4 * fgmade - 0.7 * fgattempted - 0.4 * (ftattempted - ftmade) + 0.7 * reboffensive + 0.3 * rebdefensive + steals + 0.7 * assists + 0.7 * blocks - 0.4 * defensivefouls - turnovers, netRTG = teampoints / offensivepossessions - opponentteampoints / defensivepossessions, .after = team) %>% 
+  drop_na() %>%
+ filter(!is.infinite(netRTG)) %>%
+mutate(netRTG = scale(netRTG), gameScore = scale(gameScore)) %>%
+  mutate(valor = netRTG + gameScore, .before = gameScore) %>% 
+  group_by(season, team, player_name) %>%
+  summarise(mvalor = mean(valor), svalor = sum(valor)) %>%
+  #For this comprehensive metric, I want to make sure that they played enough games to avoid anomalies of 2 way contracts who had good minutes that could happen with taking the mean, but also not just reward the player who played the most games in case the star of the team missed some games that would happen with taking the sum
+  mutate(valor = (mvalor * 50 + svalor) / 50 ) %>%
+  group_by(season, team) %>%
+  arrange(desc(valor)) %>%
+  slice_head(n = 5)
+
+#Variable that stores players playoff games and whether they won or not
+playoffs_df <- player_data %>%  
+  filter(gametype == 4, between(season,2014, 2023)) %>% 
+  inner_join(team_data %>%
+               select(gamedate, off_team, off_win), by = join_by(team == off_team, gamedate == gamedate)) %>% 
+  select(gamedate, season, player_name, team, seconds, off_win )
+
+
+#Function that calculates number of games won for a player prior to a certain season
+#@params playername- name of the player we want to count experience for
+#@params year- year we are looking at to start counting playoff games prior
+playoff_win_count <- function(playername, year){
+  playoffs_df %>%
+    filter(player_name == playername, season < year) %>%
+    summarise(total_wins = sum(off_win, na.rm = TRUE)) %>%
+    pull(total_wins)
+}
+
+
+#Applys function to all of the top players
+result <- map2_dbl(topPlayers$player_name, topPlayers$season, playoff_win_count)
+
+# Add the result as a new column to topPlayers
+topPlayers$playoff_wins_prior <- result
+
+injuries = team_data %>% filter(between(season, 2018, 2023), gametype == 2) %>%
+  group_by(season, off_team) %>%
+  arrange(season, desc(gamedate)) %>%  # Arrange by season and descending gamedate
+  slice_head(n = 5) %>%  # Keep only the first 5 rows (which are the last 5 games due to descending order)
+  ungroup() %>% 
+  inner_join(player_data, by = join_by(gamedate == gamedate, off_team == team)) %>%
+  inner_join(topPlayers, by = join_by(season.x == season, player_name == player_name)) %>% 
+  group_by(team, player_name, season.x) %>%
+  summarise(injured = if_else(sum(missed) == 5, 1, 0)) %>%
+  arrange(season.x, team)
+
+topPlayerI <- topPlayers %>% inner_join(injuries, by = join_by(player_name == player_name, season == season.x))
+
+#Dataframe that keeps track of teams,the strenght of their best player, and the total playoff winning experience of their top 5 players
+playoffExp <-topPlayerI %>% group_by(team.x, season) %>% summarise(valor = max(valor), exp = sum(playoff_wins_prior), injuries = sum(injured)) %>%
+  rename(team = team.x)
+```
+
+Got rid of variables to fit first model to avoid problems of multi-collinearity, curse of dimensionality, and just any other exploding variance problems
+Variables ommited:
+point_diff: netRTG covers information gained here
+fgmade made and attemped stats: Points, and percentages cover what there is to be gained from these, kept fg3made and shootingfoulsdrawn due to these being seperate parts of games which can help outside of just providing points (such as spacing with 3s, and controlling pace and/or gaining momentum with free throws)
+Rebounds, assists as we have their percentage stats which control for things that don't necessarily measure what the stat is measruing (opponent's pace, missed shots -> more oBoards, and even for defense we account for defensive performance with other stats, so no need for dReb, as we should keep rebunding stats to account for rebounding impact)
+```{R}
+relData <- regSeason %>% select(season, off_team, offRTG, defRTG, netRTG, oRebPerc, dRebPerc, winPerc, winPercEndI, crunchWinPercI, fg3made, steals, turnovers, blocks, defensivefouls, offensivefouls, shootingfoulsdrawn, possessions, points, shotattemptpoints, fgPerc, fg3Perc, ftPerc,  fg3made_def, steals_def, turnovers_def, blocks_def, defensivefouls_def, offensivefouls_def, shootingfoulsdrawn_def, possessions_def, fgPerc_def, fg3Perc_def, ftPerc_def, assistsPerc, assistsPerc_def)
+
+#Adds regular season stats to the corresponding playoffs
+df <- playoff_data %>% 
+  select(season, gamedate, off_team, def_team, off_home, off_win, playoffRound, game) %>%
+  inner_join(relData, by = join_by(season == season, off_team == off_team)) %>%
+  inner_join(playoffExp, by = join_by(season == season, off_team == team)) 
+  
+allStats <- (df %>% inner_join(df, join_by(off_team == def_team, gamedate == gamedate)) %>% select(offRTG.x : injuries.x) -
+df %>% inner_join(df, join_by(off_team == def_team, gamedate == gamedate)) %>% select(offRTG.y : injuries.y) )%>% rename_with(~ str_replace(., "\\.x$", ""), .cols = everything())
+
+fd = df
+
+fd = fd %>% select(season:game)
+df = fd %>% bind_cols(allStats)
+```
+I thought about making the model incorporating previous playoff series data from the same playoffs, for example for a conference finals match-up, I would expect that certain variables from first 2 series would be important. But, due to the end goal of predicting this year's playoffs, given we only have data of the regular season for this season, I decided to not use that data.
+
+
+Removes the duplicate instances for each game, since before the dataframe had 2 rows for the same game, one for each team being "off_team", by now we have gotten the dataframe to where all stats for a specific game are in a single row.
+We don't want duplicates for a single game as this could add some bias into a future model and distort the findings
+```{R}
+#Function that sorts a vector and takes into a parameter a row which should be represented
+sort_row <- function(row) {
+  return(sort(row))
+}
+
+sorted_df <- df %>%
+  rowwise() %>%
+  mutate(sorted_date = gamedate,
+         sorted_off_team = sort_row(c(off_team, def_team))[1],
+         sorted_def_team = sort_row(c(off_team, def_team))[2]) %>%
+  ungroup()
+
+# Remove duplicates based on the sorted columns while keeping other columns intact
+fModeldf <- sorted_df %>%
+  group_by(sorted_date, sorted_off_team, sorted_def_team) %>%
+  slice(1) %>%
+  ungroup() %>%
+  select(-sorted_date, -sorted_off_team, -sorted_def_team) %>%
+  mutate(playoffRound = as.factor(playoffRound), game = as.factor(game))
+
+
+```
+Creates model framework
+```{R}
+
+library(caret)
+
+#Function that creates a logistic regression model predicting the chance of winning a game based on predictors and performs a k-fold cross validation to evaluate CV error
+#@params data- dataframe that will be used for building logistic regression model
+#@params response- response variable of interest, will be off_win for all intensive purposed
+#@params predictors- vector of all the features that we want to check CV error for
+#@params k- number of folds for CV, or number of parititions to make in the data to be used as test sets
+#This will the cross-validation accuracy score, the final data frame that has predictions and likelihoods of a game going a certain way, a model summary which will give all the coeffecients and probabilities that their values stray from 0 by chance, and finally the overall model
+kf_cv_logistic <- function(data, response, predictors = c(), k = 10) {
+
+
+    formula <- as.formula(paste(response, "~", paste(predictors, collapse = " + ")))
+
+  
+  # Create folds
+  flds <- createFolds(data[[response]], k = k, list = TRUE, returnTrain = FALSE)
+  
+  # Function to fit model and predict
+  fit_predict <- function(train_index, test_index) {
+    train <- data[train_index, ]
+    test <- data[test_index, ]
+    
+    model <- glm(formula, data = train, family = binomial)
+    predicted_prob <- predict(model, test, type = "response")
+    
+    data.frame(actual = test[[response]], predicted_prob = predicted_prob)
+  }
+  
+  
+  # Perform k-fold cross-validation
+  results <- map_dfr(1:k, function(i) {
+    train_index <- setdiff(seq_len(nrow(data)), flds[[i]])
+    test_index <- flds[[i]]
+    fit_predict(train_index, test_index)
+  })
+  
+  # Calculate accuracy
+  results <- results %>%
+    mutate(predicted_class = ifelse(predicted_prob > 0.5, 1, 0))
+  
+  accuracy <- mean(results$predicted_class == results$actual)
+  
+  # Fit the final model on the entire dataset
+  final_model <- glm(formula, data = data, family = binomial)
+  
+  # Append percent change column to the data
+  data <- data %>%
+    mutate(percent_chance = predict(final_model, data, type = "response"))
+  
+  return(list(
+    accuracy = accuracy,
+    data = data,
+    model_summary = summary(final_model),
+    model = final_model
+  ))
+}
+
+```
+
+
+Does forward selection, or starts with just the intercept and iteratively adds a variable based on what variable improves the model the most. Returns the best possible model for every size possible that is allowed
+```{R, warning = FALSE}
+
+library(caret)
+library(leaps)
+library(glmnet)
+
+set.seed(9)
+
+# Select relevant columns
+selected_vars <- c("off_home", "off_win", "playoffRound", "offRTG", "defRTG", "netRTG",
+                   "oRebPerc", "dRebPerc", "winPerc", "fg3made", "steals", "turnovers", "blocks",
+                   "defensivefouls", "offensivefouls", "shootingfoulsdrawn", "possessions", "points",
+                   "shotattemptpoints", "fgPerc", "fg3Perc", "ftPerc", "fg3made_def", "steals_def",
+                   "turnovers_def", "blocks_def", "defensivefouls_def", "offensivefouls_def",
+                   "shootingfoulsdrawn_def", "possessions_def", "fgPerc_def", "fg3Perc_def", "ftPerc_def",
+                   "valor", "exp", "injuries", "winPercEndI", "crunchWinPercI")
+
+fModeldf_selected <- fModeldf %>%
+  select(all_of(selected_vars)) %>%
+  mutate(off_win = as.factor(off_win))
+# Define the formula
+formula <- as.formula("off_win ~ .")
+
+# Perform forward selection
+forward_selection <- regsubsets(formula, data = fModeldf_selected, nvmax = 18 ,method = "forward")
+
+summary_fs <- summary(forward_selection)
+
+# Define cross-validation method
+control <- trainControl(method = "cv", number = 10)
+
+# Initialize a list to store CV accuracy for each model size
+cv_accuracies <- numeric()
+
+# Loop through each model size
+for (i in 1:18) {
+  # Get the variables in the model of size i
+  model_vars <- names(which(summary_fs$which[i,]))
+  
+  # Create a formula with these variables
+  
+  model_formula <- as.formula(paste("off_win ~", paste(model_vars[model_vars != "(Intercept)"], collapse = "+")))
+  
+  # Fit the model using logistic regression
+  glmnet_model <- train(
+    model_formula,
+    data = fModeldf_selected %>% as.matrix(),
+    method = "glmnet",
+    family = "binomial",
+    trControl = control
+  )
+  
+  # Store the CV accuracy
+  cv_accuracies[i] <- max(glmnet_model$results$Accuracy)
+}
+
+# Find the model size with the best CV accuracy
+best_model_size <- which.max(cv_accuracies)
+
+# Get the variables in the best model
+best_model_vars <- names(which(summary_fs$which[best_model_size,]))
+
+# Create a formula with these variables
+best_model_formula <- as.formula(paste("off_win ~", paste(best_model_vars[best_model_vars != "(Intercept)"], collapse = "+")))
+best_model1 <- glm(best_model_formula, data = fModeldf_selected, family = binomial)
+cat("Best model formula:", deparse(best_model_formula), "\n")
+summary(best_model1)
+```
+
+Now to do some of my own model selection based on domain knowledge, lets start with forward selection model
+
+```{R}
+
+m1 = kf_cv_logistic(fModeldf, response = "off_win", 
+                         predictors = c("off_home", "offRTG", "winPerc", "fg3made", "assistsPerc", 
+               "possessions", "points", "fg3Perc", "ftPerc", "fg3made_def", 
+               "blocks_def", "fg3Perc_def", "injuries", "crunchWinPercI"))
+m1$accuracy
+m1$model_summary
+```
+
+Some variables do not look to be going the way they should, which could be due to interference with others. For example a higher fg3 percentage shouldn't make chance of winning lower, same with a higher opponent 3 pointers made shouldn't make chance of winning higher given other variables
+```{R}
+m2 = kf_cv_logistic(fModeldf, response = "off_win", 
+                         predictors = c("off_home",  "winPerc", "fg3made", "assistsPerc", 
+               "possessions", "points", "ftPerc", "possessions_def",
+               "blocks_def", "fg3Perc_def", "injuries", "crunchWinPercI"))
+m2$accuracy
+m2$model_summary
+
+```
+
+```{R}
+best_model = m2$model
+modeRes <- fModeldf %>%
+    mutate(percent_chance = predict(best_model, fModeldf, type = "response")) %>%
+  arrange(desc(season), off_team, gamedate) 
+```
+
+
+
+```{R}
+#Creates separate dataframes for each season, team and round to then predict out all 7 games even if a series didn't go 7
+dfsformod <- modeRes %>% group_by(season, off_team, playoffRound) %>% group_split()
+
+# Function to ensure each dataframe has 7 rows
+#Will be used to predict each game in a series up to 7 to get comprehensive probabilities
+fill_to_seven <- function(df) {
+  n <- nrow(df)
+  if (n < 7) {
+    first_row <- df[1, ]
+    rows_to_add <- 7 - n
+    missing_rows <- first_row[rep(1, rows_to_add), ]
+
+    missing_rows$game <- (n + 1):7
+    
+    # Set 'percent_chance' to NA
+    missing_rows$percent_chance <- NA
+    missing_rows$off_win <- NA
+    missing_rows$game = as.factor(missing_rows$game)
+    # Combine the original dataframe with the missing rows
+   # print(df)
+    #print(missing_rows)
+    df <- bind_rows(df, missing_rows)
+    df$off_home[5] <- df$off_home[1]
+    df$off_home[6] <- df$off_home[3]
+    df$off_home[7] <- df$off_home[1]
+  }
+  return(df)
+}
+
+# Dataframe that adds other rows for possible future games to make official predictions for series'
+dataWithAdded <- dfsformod %>% map_dfr(fill_to_seven)
+
+newData = dataWithAdded %>% filter(is.na(percent_chance))
+
+newData$percent_chance = predict(best_model, newdata =newData, type = "response")
+
+#Predictions for every game, even games that did not happen
+fullPred = bind_rows(dataWithAdded %>% filter(!is.na(percent_chance)), newData) %>% arrange(season, off_team, game)
+```
+
+
+
+
+```{R}
+
+#Function that calculates a probability of a series win as well as the distribution of how many games the series will end in based on a dataframe that has a vector for probabilities of winning each game
+#Outputs both a probability of a series win and a table that shows the percent chance of a certain team winning or losing in a certain amount of games
+calcWinProb = function(df){
+
+  prob_vector = df$percent_chance
+outcomes <- c("W", "L")
+
+# Generate all combinations of outcomes of length 7
+all_combinations <- expand.grid(replicate(7, outcomes, simplify = FALSE))
+allcombs2 = all_combinations
+allcombs2 = setNames(allcombs2, paste0("v", 1:7))
+
+all_combinations <- all_combinations %>%
+  mutate_all(as.character) %>%
+  as_tibble()
+
+#Function to replace W or L values with liklihoods of them happening for thar specific game based on model predictions
+replace_values <- function(x, col_index) {
+  case_when(
+    x == "W" ~ as.character(prob_vector[col_index]),
+    x == "L" ~ as.character(1 - prob_vector[col_index]),
+    TRUE ~ x
+  )
+}
+
+#Updates the dataframe to fill in the dataframe with all 2^7 combinations of W and L possible, these will later populated by probabilities based on that specific series
+all_combinations <- map2_dfc(all_combinations, seq_along(prob_vector), ~ replace_values(.x, .y))
+
+#Makes dataframe of all possibilities of W and L as well as percent chance of them happening 
+outcome = all_combinations %>%   rowwise() %>%
+  mutate_all(as.numeric) %>%
+  mutate(product = prod(c_across(everything()))) %>%
+  bind_cols(allcombs2) %>% ungroup()
+#Calculates chance of a team winning a series
+winprob = outcome %>%  filter(rowSums(select(., 9:(15)) == "W") >=4) %>% summarise(prob = sum(product)) %>% pull(prob)
+winIn = function(win = "W", games = 4){
+  outcome %>%  filter(rowSums(select(., 9:(9+games-1)) == win) >=4) %>% summarise(prob = sum(product)) %>% pull(prob)
+}
+
+
+#Calculates a dataframe for the distribution of games it'll take to win a series
+gameDist = map2_dbl( c(rep("W", 4), rep("L", 4)), rep(4:7, 2), winIn) %>% matrix(nrow = 4, ncol = 2) %>% data.frame(row.names = 4:7) %>% 
+  mutate("W" = X1, "L" = X2) %>% 
+  select(W, L) %>%
+   mutate(W = W - lag(W, default = 0),L = L - lag(L, default = 0) )
+
+return(list(winprob, gameDist))
+}
+
+
+split_pred = fullPred %>% group_by(season, off_team, def_team)  %>% group_split() 
+#Calculates all series win probabilities
+probs = split_pred %>% map(calcWinProb)
+
+
+#List of dataframes that store percent chance of each team winning or listing in a certain amount of games
+listOfSeriesDist = map(1:length(probs), function(x) {probs[[x]][[2]]} )
+
+
+seriesPred = fullPred %>% 
+  filter(!is.na(off_win)) %>%
+  group_by(season, off_team, def_team) %>% 
+  summarise(playoff_round = first(playoffRound), winner = round(mean(off_win))) %>% 
+  ungroup()
+
+#Function that takes probabilities to predict how many games a series is predicted to end in
+gamesPred <- function(winPred, list_df) {
+  if (winPred < 0.5) {
+    # Access the L column and find the rowname for the highest value
+    max_row <- which.max(list_df$L) + 3
+  } else {
+    # Access the W column and find the rowname for the highest value
+    max_row <- which.max(list_df$W) + 3
+  }
+  return(max_row)
+}
+
+
+#Creates a column for probability of winning overall series from the winning of each individual game
+seriesPred$winProb = map_dbl(1:length(probs), function(x) {probs[[x]][[1]]} )
+
+#Creates a column that stores the point estimate for how many games it will take
+seriesPred$gameEstimate = (map2_dbl(seriesPred$winProb, listOfSeriesDist, gamesPred))
+seriesPred %>% 
+  mutate(winPred = round(winProb)) %>%
+  filter(winner == winPred) %>%
+  nrow() %>%
+  {str_glue("Percent past playoff series predicted correctly by the model is {round(. / nrow(seriesPred) * 100, 2)}%")}
+  
+
+```
+
+
+Current playoff prediction
+
+
+Setting up dataframe for prediction
+```{R}
+
+
+
+
+thisSeason = (createRegSeason(2023, 2023)) %>% 
+  mutate(ftPerc = ftmade / ftattempted) %>%
+ select(season, off_team, offRTG, defRTG, netRTG, oRebPerc, dRebPerc, winPerc, winPercEndI, crunchWinPercI, fg3made, steals, turnovers, blocks, defensivefouls, offensivefouls, shootingfoulsdrawn, possessions, points, shotattemptpoints, fgPerc, fg3Perc, ftPerc,  fg3made_def, steals_def, turnovers_def, blocks_def, defensivefouls_def, offensivefouls_def, shootingfoulsdrawn_def, possessions_def, fgPerc_def, fg3Perc_def, ftPerc_def, assistsPerc, assistsPerc_def)
+
+
+#Creates function that takes the participating playoff teams and the round and returns predictions for winners as well as a probabilistic distribution for number of games
+createPredict = function(off_team, def_team, round){
+#Creates empty dataframe with all all current playoff teams and their matchups based on vectors taken as parameters
+dfC = data.frame(season = 2023, off_team = rep(c(off_team[1:4],def_team[1:4], off_team[5:8], def_team[5:8]), each = 7), def_team = rep(c(def_team[1:4], off_team[1:4], def_team[5:8], off_team[5:8]), each = 7), off_home = c(1, 1, 0, 0, 1, 0, 1), playoffRound = round, game = 1:7) %>%
+  inner_join(thisSeason, by = join_by(season == season, off_team == off_team)) %>%
+  inner_join(playoffExp, by = join_by(season == season, off_team == team))
+
+#Variable that finds the difference in every relevant stat between one team vs its opponent
+allStatsC <- ((dfC %>% inner_join(dfC, join_by(off_team == def_team, season == season, game== game)) %>% select(offRTG.x : injuries.x)) -
+(dfC %>% inner_join(dfC, join_by(off_team == def_team, season == season, game== game)) %>% select(offRTG.y : injuries.y) ))%>% rename_with(~ str_replace(., "\\.x$", ""), .cols = everything())
+
+fdC = dfC
+
+fdC = fdC %>% select(season:game)
+dfC = fdC %>% bind_cols(allStatsC)
+
+
+
+sorted_dfC <- dfC %>%
+  rowwise() %>%
+  mutate(sorted_date = game,
+         sorted_off_team = sort_row(c(off_team, def_team))[1],
+         sorted_def_team = sort_row(c(off_team, def_team))[2]) %>%
+  ungroup() %>%
+  mutate(games = as.factor(game), playoffRound = as.factor(playoffRound))
+
+
+fourth_size <- ceiling(nrow(sorted_dfC)/ 4)
+
+# Generate indices for each fourth
+first_fourth_indices <- 1:fourth_size
+third_fourth_indices <- (2 * fourth_size + 1):(3 * fourth_size)
+second_fourth_indices <- (fourth_size + 1):(2 * fourth_size)
+
+# Combine the indices
+if(round == 1){
+selected_indices <- c(first_fourth_indices, third_fourth_indices)}
+else{
+  selected_indices <- c(first_fourth_indices, second_fourth_indices)
+}
+
+# Select rows by the combined indices
+fModeldfC <- sorted_dfC %>%
+  slice(selected_indices) %>%
+  mutate(games = as.factor(game), playoffRound = as.factor(playoffRound))
+fModeldfC$game = as.factor(fModeldfC$game)
+
+
+fModeldfC$percent_chance = predict(best_model,newdata= fModeldfC, type="response") 
+
+
+split_predC = fModeldfC %>% group_by(season, off_team, def_team)  %>% group_split() 
+#Calculates all series win probabilities
+probsC = split_predC %>% map(calcWinProb)
+
+#List of dataframes that store percent chance of each team winning or listing in a certain amount of games
+listOfSeriesDistC = map(1:length(probsC), function(x) {probsC[[x]][[2]]} )
+
+
+seriesPredC = fModeldfC %>% 
+  group_by(playoffRound, off_team) %>% 
+  summarise(def_team = first(def_team),season = first(season)) %>% 
+  ungroup()
+
+
+seriesPredC$winProb = map_dbl(1:length(probsC), function(x) {probsC[[x]][[1]]} )
+
+seriesPredC$gameEstimate = (map2_dbl(seriesPredC$winProb, listOfSeriesDistC, gamesPred))
+seriesPredC$gameDist = listOfSeriesDistC
+
+# Function to rename columns to team names
+rename_columns <- function(game_dist_df, off_team, def_team) {
+  game_dist_df %>%
+    rename(
+      !!off_team := W,
+      !!def_team := L
+    )
+}
+#Overall dataframe that stores each series, who is expected to win, in how many games and the ditribution
+seriesStore <- seriesPredC %>%
+  mutate(gameDist = map2(gameDist, off_team, ~rename_columns(.x, .y, def_team[match(.y, off_team)])))
+
+desired_order = fModeldfC$off_team %>%unique()
+
+
+
+seriesStore %>%
+  mutate(off_team = factor(off_team, levels = desired_order)) %>%
+  arrange(off_team)
+}
+
+#First round predictions
+firstRound = createPredict(c("BOS", "NYK", "MIL", "CLE", "OKC", "DEN", "MIN", "LAC"), c("MIA", "PHI", "IND", "ORL", "NOP", "LAL", "PHX", "DAL"), 1) 
+
+```
+
+Other idea is to make a forest model of outcomes being series ending in different amounts of games, and then assigns percents by how many lead to a particular outcome
+
+
+Creates dataframe for second round
+```{R}
+newoff = firstRound %>% 
+  mutate(col = if_else(winProb > .5, off_team, def_team)) %>%
+  pull(col) %>%
+  .[c(1, 2, 5, 6)]
+
+newdeff = firstRound %>% 
+  mutate(col = if_else(winProb > .5, off_team, def_team)) %>%
+  pull(col) %>%
+  .[c(4,3, 8, 7)]
+
+secondRound = createPredict(newoff, newdeff, 2)
+
+```
+
+
+Creates dataframe predicting conference finals
+```{R}
+semioff = secondRound %>% 
+  mutate(col = if_else(winProb > .5, off_team, def_team)) %>%
+  pull(col) %>%
+  .[c(1, 3)]
+
+semideff = secondRound %>% 
+  mutate(col = if_else(winProb > .5, off_team, def_team)) %>%
+  pull(col) %>%
+  .[c(2, 4)]
+
+semis = createPredict(semioff, semideff, 3) 
+```
+
+```{R}
+finalsoff = semis %>% 
+  mutate(col = if_else(winProb > .5, off_team, def_team)) %>%
+  pull(col) %>%
+  .[1]
+
+finalsdeff = semis %>% 
+  mutate(col = if_else(winProb > .5, off_team, def_team)) %>%
+  pull(col) %>%
+  .[2]
+
+finalsPred =  createPredict(finalsoff, finalsdeff, 4) %>% slice(1)
+
+```
+Creates dataframe predicting the whole playoffs for this season
+```{R}
+playoffPredictions <- firstRound %>% rbind(secondRound) %>% rbind(semis) %>% rbind(finalsPred)
+
+playoffPredictions %>% filter(off_team == "OKC", playoffRound == 1) %>% pull(gameDist)
+
+
+
+```
+
+
+
+ 
+ 
+ - A brief written overview of how your model works, targeted towards a decision maker in the front office without a strong statistical background.  
+ 
+There are a couple approaches to take when constructing a playoff predictor model, the first one is to use past series data to predict the outcome of a series as a whole along with how many games it will take. But if we do that, we would need a lot of series data, and to access that we would need to go back many seasons, and in doing so we would sacrifice the power of changes in the modern NBA that have happened. Plus, in doing so, our estimates would not for how many games it will take fo a series to end would not be as accurate.
+Rather, I took an approach, where I predicted the outcome and probability of that outcome of a single playoff game using a magnitude of variables with logistic regression. From this, I can combine single game probabilities and outcomes to an overall playoff series predictor. In this model one can view the chance of a team winning the series, the expected number of games, as well as the distribution for the expected number of games. 
+For example for the Thunder, Pelicans first round matchup
+
+```{R}
+
+
+playoffPredictions %>% filter(off_team == "OKC", playoffRound == 1) %>% pull(gameDist)
+
+
+```
+ 
+ This shows the probability of each team winning in a certain number of games.
+ 
+```{R}
+best_model 
+ 
+```
+ Most of these variables except for off_home are based on the difference between one team and the other team's stat for those. This was done to avoid too many variables. For example, winPerc here would be OKC's winPerc - NOP's winPerc, as it would require too many variables to include both of those in the model.
+ 
+ These are the model coefficients, for most of them, you can interpret them with how many times as likely will they be to win given a x increase in that variable, holding everything else equal.  Calculate this by $$e^{x * variable coeffecient}$$. For example with the win percentage difference, this is saying that for every .1 or 10% higher win percentage a team has above their opponent, their odds of winning increase by 1.32071 given every other variable is the same.
+ This is slighlty different for interpreting the effect of a team playing on their home floor, holding everything else different, this shows that playing on their home floor increases their odds of winning by 55.6%.
+ 
+ The variables were selected by iteratively adding the variable that gives the most improvement to the model, then going through and finding the set of variables that contains an ample amount of information while also not paying too much attention to the random occurrences that happen throughout games. After all this, I went in and changed certain variables around that didn't make sense from a basketball perspective while maintaining accuracy.
+ 
+ Some of the most important variables were the obvious ones of win percentage and being on home court, but injuries the last 5 games of the season was also very important, as was possessions.
+ 
+Some key takeaways from the model stem from a quote by Tyrese Haliburton this playoffs, where he talked about how the healthier team wins. Some other actionable insights include how playing at a high pace in the regular season can be an indicator for playoff game success, and holding your opponents to a slower pace also helps. Also, we can see the value of guarding the 3pt line as teams that give up a higher 3pt% have a lower chance of winning. 
+ 
+ 
+  - What you view as the strengths and weaknesses of your model.  
+  
+  Strengths: Model being trained on individual games allows for more insights and predictions about each series such as a distribution for number of games each series can go to and the percent chance it goes to that number of games for each winner. This gives more detailed prediction power.
+  Also not training the model on series', and instead training it on games helps reduce variance where using a database of so many features, and it also prevents possibilities of reaching a point of curse of dimensionality if the model selection process yielded a lot of the features that were initially produced.
+  My model also does a fairly good job of predicting playoff series winners, predicting around 3/4ths of them accurately. 
+  Adopting a logistic regression framework also allowed more interpretibility to my model, as we can directly see probability of a win for each game. We can also view how a variable directly changes probability one way or another, allowing for a stakeholder in the front office to use the insights to make changes.
+  I think the model was also able to get insightful and useful insights, some of which include the impact of defending the 3pt line, making your free throws, and slowing down the opponent's pace.
+  
+Weaknesses: 
+This model still suffers from high variance due to still having a sample size on the lower end in comparison to all the features, and this also disallows subsetting model based on something such as playoff rounds. 
+I considered doing PCA or other dimensionality reduction to try to include more information without spiking variance even more, but decided that it is not worth sacrificing explainbility and specific variable importantces.
+The model also fails to capture the essence of having a great player and their experience and how that matters in playoff series' as we have seen anecdotally time and again, and especially still fails at fully capturing the role of injuries on playoff success. As sometimes we may just miss an injury happening due to them getting injured 1 or 2 games before the playoffs instead of 5. Even the other way around can happen, where a player might miss the last 5 games of the season, but be ready for the playoffs, especially in later rounds.
+This injury variable could also be interacted with playoff rounds, as players regular season injury history can affect their first rounds but maybe not later on, but due to sample size, making some sort of interaction would increase variance a little to much.
+
+The model also was not able to fully capture the impact of defense on playoff winning, or at least separate its impact from regular season winning success. Defensive rating could not fully cover this as it ended up not having a large impact due to win percentage and a couple niche defensive stats
+
+The overall accuracy of the model is also not great at around 75%, this could use improvements.
+
+
+  
+  - How you'd address the weaknesses if you had more time and/or more data. 
+  
+  To address the variance issue of the model, given more time and data, I would start by training it on more playoff series going further back in time. As of now, I went back to the 2018-19 season, due to wanting to leverage previous seasons for feature engineering, such as calculating a player's experience. 
+  Speaking of player experience, although, not shown by the model, this could still be an important variable, but given data stretching back 20 years or so, this variable could capture players with a lot of experience, who even with lower amounts in other categories are still expected to make a deep run. Players like this, include Lebron or Curry.
+  
+  Another way to control variance is to get more data, and with more time, I could implement a transfer learning approach where I train the majority of my model on regular season games, and then further tune it with playoff games. This could happen faster by just weighing the playoff games higher to at least match the volume of regular season games. 
+  Another option for variance control is bootstrapping either with the regular season approach, or just by bootstrapping playoff games, I could generate more data.
+  As with all of these, I would need time to test if it does actually bring variance lower, and improve model accuracy.
+  
+  Also, while I attempted to make a clutch time category, instead of capturing the essence of playing well in the clutch, I think it ended up capturing a team's ability to close teams out without being in the clutch. With play by play data, I could make a more comprehensive clutch time category to possibly help capture the fact that certain close games matter more in the context of the playoffs, thus elevating the need for clutch players.
+  Specifc injury report data would also be very useful in this problem, as right now my injury variable could be impacted by a lot of things such as resting due to a minor injury, or someone getting injured at the end of a season, or just a player who is projected to come back middle of the playoffs. Having injury report data with estimates of return times would allow me to create an injury variable that is an estimate of the amount of injuries to top players on a team given a specific series.
+  
+  
+  
+  
+  - Apply your model to the 2024 NBA playoffs (2023 season) and create a high quality visual (a table, a plot, or a plotly) showing the 16 teams' (that made the first round) chances of advancing to each round.  
+  
+  
+
+```{R}
+
+
+library(gridExtra)
+library(grid)
+library(png)
+
+team_colors <- data.frame(
+  team = c("BOS", "NYK", "MIL", "CLE", "OKC", "DEN", "MIN", "LAC", "MIA", "PHI", "IND", "ORL", "NOP", "LAL", "PHX", "DAL"),
+  color = c("#007A33", "#F58426", "#00471B", "#6F263D", "#007AC1", "#0E2240", "#0C2340", "#1D428A", 
+            "#98002E", "#006BB6", "#002D62", "#0077C0", "#0C2340", "#552583", "#E56020", "#0053BC")
+)
+
+
+
+
+
+
+vectorForFirstE = c("BOS", "MIA", "CLE", "ORL", "NYK", "PHI", "MIL", "IND")
+
+df_teams <- data.frame(
+  team = vectorForFirstE
+)
+
+# Join the team colors
+df_teams <- df_teams %>%
+  left_join(team_colors, by = "team")
+
+plot1 <-ggplot(df_teams, aes(x = 1:length(team), y = 1)) +
+  geom_tile(aes(fill = color), width = 0.8, height = 0.8, color = "white") +
+  geom_text(aes(label = team), size = 4, color = "white") +
+  scale_fill_identity() +
+  theme_void() +
+  labs(title = "Eastern Conference Playoffs") +
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.title.x = element_blank(), 
+    axis.ticks.y = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+
+
+
+fR = firstRound %>% mutate(team = if_else(winProb > .5, off_team, def_team),winProb = if_else(winProb < .5, 1-winProb, winProb)) %>% slice(1:4)
+
+
+fR <- fR %>%
+  left_join(team_colors, by = "team")
+plot2 <- ggplot(fR, aes(x = factor(team, levels =c("BOS", "CLE", "ORL", "NYK", "PHI", "IND", "MIL")), y = 1)) +
+  geom_tile(aes(fill = color), width = 0.8, height = 0.8, color = "white") +
+  geom_text(aes(label = paste(team, "\nWin Prob:", winProb, "\nGames Estimate:", gameEstimate)), size = 3, color = "white") +
+  scale_fill_identity() +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.text.y = element_blank(),
+    axis.title.y = element_blank(),
+    axis.title.x = element_blank(), 
+    panel.grid = element_blank(),
+    plot.title = element_text(hjust = 0.5)
+  ) 
+
+
+
+sR = secondRound %>% mutate(team = if_else(winProb > .5, off_team, def_team), winProb =if_else(winProb < .5, 1-winProb, winProb)) %>% slice(1:2)
+sR <- sR %>%
+  left_join(team_colors, by = "team")
+plot3 <- ggplot(sR, aes(x = factor(team, levels =c("BOS","NYK")), y = 1)) +
+  geom_tile(aes(fill = color), width = 0.8, height = 0.8, color = "white") +
+  geom_text(aes(label = paste(team, "\nWin Prob:", winProb, "\nGames Estimate:", gameEstimate)), size = 3, color = "white") +
+  scale_fill_identity() +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.text.y = element_blank(),
+    axis.title.y = element_blank(),
+    axis.title.x = element_blank(), 
+    panel.grid = element_blank(),
+    plot.title = element_text(hjust = 0.5)
+  )
+
+
+tR = semis %>% mutate(team = if_else(winProb > .5, off_team, def_team), winProb =if_else(winProb < .5, 1-winProb, winProb)) %>% slice(1)
+tR <- tR %>%
+  left_join(team_colors, by = "team")
+plot4 <- ggplot(tR, aes(x = team, y = 1)) +
+  geom_tile(aes(fill = color), width = 0.8, height = 0.8, color = "white") +
+  geom_text(aes(label = paste(team, "\nWin Prob:", winProb, "\nGames Estimate:", gameEstimate)), size = 3, color = "white") +
+  scale_fill_identity() +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.text.y = element_blank(),
+    axis.title.y = element_blank(),
+    axis.title.x = element_blank(), 
+    panel.grid = element_blank(),
+    plot.title = element_text(hjust = 0.5)
+  )
+
+
+
+tRw = semis %>%mutate(team = if_else(winProb > .5, off_team, def_team), winProb = if_else(winProb < .5, 1-winProb, winProb)) %>% slice(2)
+tRw <- tRw %>%
+  left_join(team_colors, by = "team")
+plot5 <- ggplot(tRw, aes(x = team, y = 1)) +
+  geom_tile(aes(fill = color), width = 0.8, height = 0.8, color = "white") +
+  geom_text(aes(label = paste(team, "\nWin Prob:", winProb, "\nGames Estimate:", gameEstimate)), size = 3, color = "white") +
+  scale_fill_identity() +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.text.y = element_blank(),
+    axis.title.y = element_blank(),
+    axis.title.x = element_blank(), 
+    panel.grid = element_blank(),
+    plot.title = element_text(hjust = 0.5)
+  )
+
+
+
+sRw = secondRound %>% mutate(team = if_else(winProb > .5, off_team, def_team), winProb =if_else(winProb < .5, 1-winProb, winProb)) %>% slice(3:4)
+sRw <- sRw %>%
+  left_join(team_colors, by = "team")
+plot6 <- ggplot(sRw, aes(x = factor(team, levels = c("OKC")), y = 1)) +
+  geom_tile(aes(fill = color), width = 0.8, height = 0.8, color = "white") +
+  geom_text(aes(label = paste(team, "\nWin Prob:", winProb, "\nGames Estimate:", gameEstimate)), size = 3, color = "white") +
+  scale_fill_identity() +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.text.y = element_blank(),
+    axis.title.y = element_blank(),
+    axis.title.x = element_blank(), 
+    panel.grid = element_blank(),
+    plot.title = element_text(hjust = 0.5)
+  )
+
+
+
+fRw = firstRound %>% mutate(team = if_else(winProb > .5, off_team, def_team),winProb = if_else(winProb < .5, 1-winProb, winProb)) %>% slice(5:8)
+
+fRw <- fRw %>%
+  left_join(team_colors, by = "team")
+plot7 <- ggplot(fRw, aes(x = factor(team, levels =c("OKC", "DAL", "LAC","DEN", "MIN", "PHX" )), y = 1)) +
+  geom_tile(aes(fill = color), width = 0.8, height = 0.8, color = "white") +
+  geom_text(aes(label = paste(team, "\nWin Prob:", winProb, "\nGames Estimate:", gameEstimate)), size = 3, color = "white") +
+  scale_fill_identity() +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.text.y = element_blank(),
+    axis.title.y = element_blank(),
+    axis.title.x = element_blank(), 
+    panel.grid = element_blank(),
+    plot.title = element_text(hjust = 0.5)
+  ) 
+
+
+vectorForFirstW = c("OKC", "NOP", "LAC", "DAL", "DEN", "LAL", "MIN", "PHX")
+
+df_teamsw <- data.frame(
+  team = vectorForFirstW
+)
+
+# Join the team colors
+df_teamsw <- df_teamsw %>%
+  left_join(team_colors, by = "team")
+
+plot8 <-ggplot(df_teamsw, aes(x = 1:length(team), y = 1)) +
+  geom_tile(aes(fill = color), width = 0.8, height = 0.8, color = "white") +
+  geom_text(aes(label = team), size = 4, color = "white") +
+  scale_fill_identity() +
+  theme_void() +
+  labs(title = "Eastern Conference Playoffs") +
+  theme(
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.title.x = element_blank(), 
+    axis.ticks.y = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+
+final = finalsPred %>% mutate(team = if_else(winProb > .5, off_team, def_team), winProb =if_else(winProb < .5, 1-winProb, winProb)) %>% slice(1)
+final <- final %>%
+  left_join(team_colors, by = "team")
+
+
+
+celtics_logo <- readPNG("celtics_logo.png")  
+trophy_image <- readPNG("trophy.png")  
+
+celtics_logo_grob <- rasterGrob(celtics_logo, interpolate = TRUE)
+trophy_grob <- rasterGrob(trophy_image, interpolate = TRUE)
+
+
+plot9<- ggplot(final, aes(x = team, y = 1)) +
+  geom_tile(aes(fill = color), width = 0.8, height = 0.8, color = "white") +
+  geom_text(aes(label = paste(team, "\nWin Prob:", round(winProb, 2), "\nGames Estimate:", gameEstimate)), size = 3, color = "white") +
+  scale_fill_identity() +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.text.y = element_blank(),
+    axis.title.y = element_blank(),
+    axis.title.x = element_blank(), 
+    panel.grid = element_blank(),
+    plot.title = element_text(hjust = 0.5)
+  ) +
+  annotation_custom(celtics_logo_grob, xmin = .58, xmax = .78, ymin = 1.2, ymax = 1.4) +  # Top-left corner
+  annotation_custom(celtics_logo_grob, xmin = 1.2, xmax = 1.4, ymin = 1.2, ymax = 1.4) +  # Top-right corner
+  annotation_custom(celtics_logo_grob, xmin = 0.58, xmax = 0.78, ymin = 0.6, ymax = 0.8) +  # Bottom-left corner
+  annotation_custom(celtics_logo_grob, xmin = 1.2, xmax = 1.4, ymin = .6, ymax = 0.8) +  # Bottom-right corner
+  annotation_custom(trophy_grob, xmin = 0.89, xmax = 1.09, ymin = 1.2, ymax = 1.4) +  # Top-middle
+  annotation_custom(trophy_grob, xmin = 0.89, xmax = 1.09, ymin = 0.6, ymax = 0.8) +  # Bottom-middle
+  annotation_custom(trophy_grob, xmin = 0.58, xmax = 0.78, ymin = 0.8, ymax = 1) +  # 
+  annotation_custom(trophy_grob, xmin = 1.2, xmax = 1.4, ymin = 0.8, ymax = 1)  # Middle-right
+
+
+
+grid.arrange(plot1, plot2, plot3 , plot4, ncol = 1)
+plot9
+grid.arrange(plot5, plot6, plot7, plot8,  ncol = 1)
+
+```
+  
+  
+
+## Part 3 -- Finding Insights from Your Model     
+
+Find two teams that had a competitive window of 2 or more consecutive seasons making the playoffs and that under performed your model’s expectations for them, losing series they were expected to win. Why do you think that happened? Classify one of them as bad luck and one of them as relating to a cause not currently accounted for in your model. If given more time and data, how would you use what you found to improve your model?  
+
+
+```{r}
+filtData <- team_data %>%
+  filter(gametype == 4) %>% 
+  group_by(season, off_team) %>%
+  summarise(gametype = first(gametype))
+
+
+consData <- filtData %>%
+  arrange(off_team, season) %>% 
+  group_by(off_team) %>%
+  mutate(
+         prev_season = lag(season),
+         consecutive = (prev_season == season -1)) %>%
+  ungroup() %>%
+  filter(consecutive) %>%
+  select(season, off_team)
+
+seriesPred %>% inner_join(consData, join_by(off_team == off_team, season == season)) %>% filter(winner == 0 & winProb > .5)
+```
+
+These are all the teams that made the playoffs consecutive years, and my model predicted them to win the given series, but they did not.
+
+Lets first discuss the Celtics vs Heat series from 2022, in this series, both teams were mostly healthy, but the heat were on a generational run that was not predicted by many at all. I could try to say that my model could've been better by analyzing the 2020 run of them overcoming expectations, or maybe I could have incorporated the previous playoff stats from their top players. But at the end of the day, incorporating any of this would not have changed this prediction if I had made the prediction before the playoffs had started. I can attribute this to bad luck and an excellent performance by the Miami Heat.
+
+As opposed to this, when looking at a series such as the Nets vs Bucks series, there are various things I could have looked at with more data and time. For example, that year, the nets had a roster that had not played many games together and did not have great chemistry. In my model, I did incorporate improvements made at the trade deadline, but I overlooked the contrary, with more time and data, I could incorporate things such as number of games played together amongst top players. Another thing, I could look at is difference in top players from year to year, as even though the Nets made the playoffs the year prior, their roster completely changed. These could be some ways to measure chemistry. Another more work and data intensive idea would be to even conduct some web scraping and sentiment analysis to find reports about the team and figure out if there is negative discourse around their team relationships or positive, as the Nets suffered many chemistry issues that season as well. This could also have helped the Golden State Warriors, Lakers series.
+As for the other side of things, and not predicting the Milwaukee Bucks beating the Nets that series, with more time and data, I would have looked at matchup data to figure out performance of top players against players who match up against them often for a given team. This would be looking at Jrue's past matchups with Nets guards, or Tucker's matchups with Durant in the past if they were their primary defender in the past.
+I could have also developed a more comprehensive injury proneness metric with more time and more past data, this could look at around how many of every subset of a season is missed by a player due to injury, and how long those injuries are on average. This could just be a median, but it could also be a separate function of past injuries and age.
+
+Also, as it was a 7 game, second round series, a future improvement could be to incorporate players performances in past games of the same number or same round. This would require some experimentation, but with more time, I could engineer a variable that shows how a player performs at the beginning of series' vs the end of them.
+
+
+<span style="color:red">**ANSWER :**</span>    
+
+
+
+
+
+
+
